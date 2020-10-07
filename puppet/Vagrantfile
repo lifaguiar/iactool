@@ -1,0 +1,153 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+require 'openssl'
+require 'base64'
+require 'io/console'
+
+VAGRANTFILE_API_VERSION = "2"
+
+# OS Flavor
+#osFlavor = "centos/7"
+osFlavor = "generic/rhel7"
+
+# Prefix for Project
+project = "puppets"
+
+# Hostname suffix
+serverSuffix = "puppet.lincolmlabs.cloud"
+
+decrypted = ''
+rhUser = ''
+rhPwd = ''
+masterName = ''
+
+if osFlavor.include? "rhel"
+  if not File.file?(".rhuser")
+    eval File.read('redHatPortal.rb')
+  end
+  key = ''
+  iv = ''
+  # This keys are just openssl key and iv to cipher the RedHat Portal user and Login. 
+  # You can use any valid values for your own key and iv. The value must be stored on env
+  # to just facilitate multiple usages. You can type every time, if you want.
+  key = Base64.decode64(ENV['lincolmlabs_vagrant_key']).strip
+  iv = Base64.decode64(ENV['lincolmlabs_vagrant_iv']).strip
+
+  decipher = OpenSSL::Cipher.new('AES-256-CBC')
+  decipher.padding = 1
+  decipher.decrypt
+  decipher.key = key
+  decipher.iv  = iv
+  
+  decrypted = decipher.update(Base64.decode64(File.read(".rhuser"))) + decipher.final
+end
+
+eval(decrypted, binding)
+
+cluster = {
+  "master" => { :subnet => "10.10.10", :hostsCount => 1, :cpus => 1, :mem => 2048 },
+  "agent" => { :subnet => "10.10.11", :hostsCount => 1, :cpus => 1, :mem => 1024 }
+}
+
+required_plugins = %w( vagrant-hostmanager vagrant-hostsupdater vagrant-dns )
+required_plugins.each do |plugin|
+  system "vagrant plugin install #{plugin}" unless Vagrant.has_plugin? plugin
+end
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  cluster.each_with_index do |(group, info), index|
+      
+    (1..info[:hostsCount].to_int).each do |idx|
+
+      config.vm.define "#{project}-#{group}-#{idx}" do |node|
+        address="#{info[:subnet]}.#{idx + 1}"
+        if Vagrant.has_plugin?("vagrant-vbguest") then
+          node.vbguest.auto_update = true
+        end
+
+        node.dns.tld = "lincolmlabs.cloud"
+
+        node.vm.box = "#{osFlavor}"
+        node.vm.network :private_network, ip: "#{address}"
+        node.vm.hostname = "#{project}-#{group}-#{idx}.#{serverSuffix}"
+        node.vm.synced_folder '.', '/vagrant', disabled: true
+        
+        node.vm.provider "virtualbox" do |vb|
+          vb.gui = false
+          vb.name = "#{project}-#{group}-#{idx}"
+          vb.customize ["modifyvm", :id, "--memory", info[:mem], "--cpus", info[:cpus], "--hwvirtex", "on", "--audio", "none", "--natdnshostresolver1", "on"]
+        end
+
+        if group.include? "master"
+          masterName = node.vm.hostname
+        end
+
+        node.vm.provision "shell", args: "'#{rhUser}' '#{rhPwd}' '#{masterName}'", inline: <<-SHELL
+          echo 'export TZ=America/Sao_Paulo'>>/etc/bashrc
+          rm -f /etc/localtime
+          ln -s /usr/share/zoneinfo/$TZ /etc/localtime
+          sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+          systemctl restart sshd
+
+          if [ "$1" != "" ]; then
+            hash subscription-manager
+            if [ $? == 0 ]; then #if rhel
+              subscription-manager register --username "$1" --password "$2" --auto-attach --force
+              subscription-manager auto-attach
+            fi
+          fi
+          yum update --security -y          
+          yum install -y ntpdate
+          
+          #NTP service
+          hash ntpdate
+          if [ $? == 0 ]; then
+            ntpdate a.ntp.br
+            systemctl start ntpd
+            systemctl enable ntpd
+          fi
+
+          #Disable selinux (sure, we need this to puppet)
+          sed -i 's/=enforcing/=disabled/' /etc/sysconfig/selinux
+
+          # Install puppetlabs repo
+          rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
+
+          if [[ "$(hostname)" == *-master* ]]; then
+            yum -y install puppetserver
+            cat <<EOF >/etc/puppetlabs/puppet/puppet.conf
+  [master]
+    dns_alt_names=$(hostname),puppet
+  
+    [main]
+    certname = $3
+    server = $3
+    runinterval = 10m
+EOF
+            sed -i 's/2g/512m/g' /etc/sysconfig/puppetserver
+            echo "*.$(hostname | cut -d'.' -f2,3,4)" > /etc/puppetlabs/puppet/autosign.conf
+            echo "#PUT HERE YOUR MANIFEST FOR INITIAL CONFIG">/etc/puppetlabs/code/environments/production/manifests/site.pp
+            systemctl start puppetserver
+            systemctl enable puppetserver
+            firewall-cmd --zone=public --add-port=8140/tcp --permanent
+            firewall-cmd --reload
+          else
+            yum install -y puppet-agent
+
+            cat <<EOF >/etc/puppetlabs/puppet/puppet.conf
+  [main]
+  certname = $(hostname)
+  server = $3
+  runinterval = 10m
+EOF
+            puppet resource service puppet ensure=running enable=true
+            puppet ssl bootstrap
+          fi
+
+        SHELL
+      end
+    end
+  end
+end
+
