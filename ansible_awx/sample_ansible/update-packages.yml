@@ -1,0 +1,10 @@
+- hosts: all
+  gather_facts: False
+
+  tasks:
+    - name: Update System
+      become: yes
+      yum: 
+        name: *
+        security: yes
+        state: latest
