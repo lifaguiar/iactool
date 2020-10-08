@@ -114,22 +114,22 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
           fi
 
           yum update --security -y          
-          yum install -y ntpdate curl git ansible
+          yum install -y ntpdate curl git
 
           
           #NTP service
           hash ntpdate
           if [ $? == 0 ]; then
             ntpdate a.ntp.br
-            systemctl start ntpd
-            systemctl enable ntpd
+            systemctl start ntpdate
+            systemctl enable ntpdate
           fi
 
           # Install AWX if master
           if [ "$(hostname)" == "$3" ]; then
             yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
             yum install docker-ce -y
-            yum install libselinux-python3 -y
+            yum install ansible libselinux-python3 -y
 
             usermod -aG docker vagrant
 
