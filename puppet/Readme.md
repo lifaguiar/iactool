@@ -9,24 +9,8 @@ After, run:
 
 <p>After, a new server will be running on the address:</p>
 
-* 10.155.2.2: opendj-0
-
-<p>If you want to test the replication, create two servers by changing the parameter</p>
-
-`instance_count = 1`
-
-<p>to the number of instances you want. Pay attention to used memory</p>
-<p>, the parameter 
-
-`vm_memory`
-
-in the Vagrantfile. Each server will created using that number of physical memory</p>
-<p>using your host memory to allocate to each server. Change the parameter to accomodate your running servers.</p>
-
-<p>Once the servers are up and running, each new one will be available in the address 10.155.2.x where x is 3, 4, 5 and so on, depending the number of your servers. For a number of two servers, they will be available at:</p>
-
-* 10.155.2.2: opendj-0
-* 10.155.2.3: opendj-1
+* 10.10.10.2: master-1
+* 10.10.11.2: agent-1
 
 <p>You can login on each server with the following credentials:</p>
 
@@ -34,6 +18,12 @@ in the Vagrantfile. Each server will created using that number of physical memor
 >ssh password: vagrant
 
 <p>This credentials are well known by developers all alround the world using Vagrant.</p>
+
+## Deploy Puppet and Puppet Agent
+<p>Vagrant will deploy puppet-server and puppet-agent accordingly. Once up, puppetmaster will allow self register nodes from lincolmlabs.cloud (change for your needs). When the agent finished deployment, the agent will contact puppetmaster to register itself. Once done, you can deploy your
+puppet codes to puppet master and see how the will execute on agent. Vagrant will create an empty
+site.pp in this location `/etc/puppetlabs/code/environments/production/manifests/site.pp`. You can
+edit the file and make your puppet deployments
 
 ## Send files to the servers
 <p>If you need to send or copy files from the server, you can use tools using the protocol SCP (WinSCP) or even scp command line too. Your server is like any other linux server. </p>
